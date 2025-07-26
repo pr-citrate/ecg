@@ -1,3 +1,5 @@
+from typing import Sequence
+
 import torch
 import numpy as np
 from sklearn.metrics import f1_score, roc_auc_score
@@ -55,14 +57,20 @@ def get_optimizer_scheduler(model: torch.nn.Module,
     return optimizer, scheduler
 
 
-def calculate_metrics(preds: np.ndarray, targets: np.ndarray, threshold: float = 0.5):
+def calculate_metrics(
+    preds: np.ndarray,
+    targets: np.ndarray,
+    threshold: float | Sequence[float] = 0.5
+) -> dict:
     """
     Compute micro/macro F1 and mean AUROC for multi-label predictions.
 
     Args:
         preds: (N, K) float array of probabilities
         targets: (N, K) binary array
-        threshold: float or array-like of length K for binarization
+        threshold: either
+            - single float: apply same cutoff for all K labels, or
+            - sequence of length K: per-label cutoffs
 
     Returns:
         dict with keys: 'micro_f1', 'macro_f1', 'mean_auroc'
@@ -116,16 +124,28 @@ def train_one_epoch(model: torch.nn.Module,
     return total_loss / len(dataloader.dataset)
 
 
-def evaluate(model: torch.nn.Module,
-             dataloader: torch.utils.data.DataLoader,
-             criterion_fn,
-             device: torch.device,
-             threshold: float = 0.5):
+def evaluate(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    criterion_fn,
+    device: torch.device,
+    threshold: float | Sequence[float] = 0.5
+):
     """
     Evaluate model on validation/test set.
 
+    Args:
+        model: the PyTorch model
+        dataloader: DataLoader for eval
+        criterion_fn: loss function taking (logits, labels)
+        device: torch.device
+        threshold: float or sequence of length K for binarization
+
     Returns:
-        avg_loss, metrics dict, probs array, targets array
+        avg_loss (float),
+        metrics (dict),
+        probs (np.ndarray of shape (N, K)),
+        targets (np.ndarray of shape (N, K))
     """
     model.eval()
     total_loss = 0.0
@@ -151,7 +171,7 @@ def evaluate(model: torch.nn.Module,
     # convert logits to probabilities
     probs = 1 / (1 + np.exp(-all_logits))
 
-    # compute metrics on probabilities
+    # compute metrics with possibly per-class thresholds
     metrics = calculate_metrics(probs, all_targets, threshold)
 
     return avg_loss, metrics, probs, all_targets

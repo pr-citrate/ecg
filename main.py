@@ -1,22 +1,51 @@
 import os
 import argparse
+
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
 from data import ECGDataset
 from models.hybrid import HybridECGModel
 from losses import classification_loss, prototype_loss, attention_regularization
-from train_utils import get_optimizer_scheduler, train_one_epoch, evaluate
+from train_utils import get_optimizer_scheduler, train_one_epoch, evaluate, find_optimal_thresholds
 from explain import generate_counterfactual, learn_cavs, compute_tcav_scores
 
 
 def train_mode(args):
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+
     # Datasets
     train_ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
-    val_ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
+    val_ds   = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
+
+    # class-balanced sampling
+    all_labels = np.vstack([lbl for _, lbl in train_ds])
+    sample_weights = 1.0 / (all_labels.sum(axis=1) + 1)
+    sampler = torch.utils.data.WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(sample_weights),
+        replacement=True
+    )
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=args.batch_size,
+        sampler=sampler,
+        drop_last=True
+    )
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
+
+    # ——— Compute pos_weight_tensor for Focal/BCE loss ———
+    pos_counts = all_labels.sum(axis=0)
+    neg_counts = all_labels.shape[0] - pos_counts
+    pos_weight = neg_counts / (pos_counts + 1e-6)
+    pos_weight_tensor = torch.tensor(pos_weight, dtype=torch.float, device=device)
+    print("[Init] pos_weight_tensor computed", flush=True)
+
+    # ——— Initialize per-class thresholds ———
+    thresholds = np.full(args.num_labels, 0.5)
+    print(f"[Init] thresholds set to 0.5 (shape {thresholds.shape})", flush=True)
+
     # Model
     model = HybridECGModel(
         in_channels=12, d_model=args.d_model,
@@ -24,37 +53,57 @@ def train_mode(args):
         n_heads=args.n_heads, n_layers=args.n_layers,
         num_concepts=args.num_concepts, num_labels=args.num_labels
     ).to(device)
+
     # Optimizer & Scheduler
     optimizer, scheduler = get_optimizer_scheduler(
         model,
-        lr = args.lr,
-        weight_decay = args.weight_decay,
-        scheduler_type = args.scheduler,
-        scheduler_step_size = args.scheduler_step,
-        scheduler_gamma = args.scheduler_gamma,
-        scheduler_patience = args.scheduler_patience,
-        scheduler_factor = args.scheduler_factor
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        scheduler_type=args.scheduler,
+        scheduler_step_size=args.scheduler_step,
+        scheduler_gamma=args.scheduler_gamma,
+        scheduler_patience=args.scheduler_patience,
+        scheduler_factor=args.scheduler_factor
     )
+
     best_f1 = 0.0
     os.makedirs(args.output_dir, exist_ok=True)
-    for epoch in range(1, args.epochs+1):
+
+    for epoch in range(1, args.epochs + 1):
+        # define loss function with pos_weight_tensor
+        loss_fn = lambda p, t: classification_loss(
+            p, t,
+            loss_type='focal',
+            gamma=2.0,
+            pos_weight=pos_weight_tensor
+        ) + prototype_loss(model) + attention_regularization(p)
+
+        # training step
         train_loss = train_one_epoch(
-            model, train_loader, optimizer,
-            lambda p,t: classification_loss(p,t) + prototype_loss(model) + attention_regularization(p),
-            device
-        )
-        val_loss, metrics, probs, targets = evaluate(
-            model, val_loader,
-            lambda p,t: classification_loss(p,t) + prototype_loss(model) + attention_regularization(p),
-            device
+            model, train_loader, optimizer, loss_fn, device
         )
 
+        # validation step with per-class thresholds
+        val_loss, metrics, probs, targets = evaluate(
+            model, val_loader, loss_fn, device, threshold=thresholds
+        )
+
+        # scheduler step
         if args.scheduler == 'plateau':
             scheduler.step(val_loss)
         else:
             scheduler.step()
 
-        print(f"[Epoch {epoch}] Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Metrics: {metrics}", flush=True)
+        # optionally update thresholds
+        if epoch % args.threshold_freq == 0:
+            thresholds = find_optimal_thresholds(probs, targets)
+            print(f"[Epoch {epoch}] Updated thresholds", flush=True)
+
+        # logging
+        print(f"[Epoch {epoch}] Train Loss: {train_loss:.4f}, "
+              f"Val Loss: {val_loss:.4f}, Metrics: {metrics}", flush=True)
+
+        # save best
         if metrics['macro_f1'] > best_f1:
             best_f1 = metrics['macro_f1']
             path = os.path.join(args.output_dir, f"best_epoch{epoch}.pt")
