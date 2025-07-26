@@ -50,7 +50,7 @@ class TemporalAttention(nn.Module):
             dim_feedforward=dim_feedforward,
             dropout=dropout,
             activation='relu',
-            batch_first=False,
+            batch_first=True,
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
 

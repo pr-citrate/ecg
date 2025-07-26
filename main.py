@@ -37,7 +37,7 @@ def train_mode(args):
             lambda p,t: classification_loss(p,t) + prototype_loss(model) + attention_regularization(p),
             device
         )
-        val_loss, metrics = evaluate(
+        val_loss, metrics, probs, targets = evaluate(
             model, val_loader,
             lambda p,t: classification_loss(p,t) + prototype_loss(model) + attention_regularization(p),
             device
