@@ -128,6 +128,8 @@ def main():
     sub = parser.add_subparsers(dest='mode', required=True)
     # Train
     p_train = sub.add_parser('train')
+    p_train.add_argument('--scheduler', type=str, choices=['step', 'cosine', 'plateau'], default='step')
+    p_train.add_argument('--log_dir', type=str, default='runs')
     p_train.add_argument('--meta_csv', required=True)
     p_train.add_argument('--data_dir', required=True)
     p_train.add_argument('--epochs', type=int, default=50)

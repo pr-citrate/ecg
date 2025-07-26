@@ -1,12 +1,14 @@
 import os
 import argparse
 import torch
+import numpy as np
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 from data import ECGDataset
 from models.hybrid import HybridECGModel
 from losses import classification_loss, prototype_loss, attention_regularization
-from train_utils import get_optimizer_scheduler, train_one_epoch, evaluate
+from train_utils import get_optimizer_scheduler, train_one_epoch, evaluate, find_optimal_thresholds
 
 
 def parse_args():
@@ -25,6 +27,8 @@ def parse_args():
     parser.add_argument('--num_labels', type=int, required=True)
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--output_dir', type=str, default='checkpoints')
+    parser.add_argument('--scheduler', type=str, choices=['step', 'cosine', 'plateau'], default='step')
+    parser.add_argument('--log_dir', type=str, default='runs')
     return parser.parse_args()
 
 
@@ -63,8 +67,12 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay,
         scheduler_step_size=args.scheduler_step,
-        scheduler_gamma=args.scheduler_gamma
+        scheduler_gamma=args.scheduler_gamma,
+        scheduler_type = args.scheduler
     )
+
+    writer = SummaryWriter(log_dir=args.log_dir)
+    thresholds = np.full(args.num_labels, 0.5)
 
     # ——— Resume from checkpoint if provided ———
     start_epoch = 1
@@ -87,13 +95,32 @@ def main():
         train_loss = train_one_epoch(model, train_loader, optimizer,
                                      lambda p, t: classification_loss(p, t) + prototype_loss(
                                          model) + attention_regularization(p), device)
-        val_loss, val_metrics = evaluate(model, val_loader,
+        val_loss, val_metrics, probs, targets = evaluate(model, val_loader,
                                          lambda p, t: classification_loss(p, t) + prototype_loss(
                                              model) + attention_regularization(p),
                                          device)
-        scheduler.step()
+        # Scheduler step
+        if args.scheduler == 'plateau':
+            scheduler.step(val_loss)
+        else:
+            scheduler.step()
 
-        print(f"Epoch {epoch}: Train Loss {train_loss:.4f}, Val Loss {val_loss:.4f}, Val Metrics {val_metrics}")
+        # Threshold tuning every 5 epochs
+
+        if epoch % 5 == 0:
+            thresholds = find_optimal_thresholds(probs, targets)
+            print(f"[Epoch {epoch}] Updated thresholds: {thresholds}", flush=True)
+
+        # TensorBoard logging
+        writer.add_scalar('Loss/train', train_loss, epoch)
+        writer.add_scalar('Loss/val', val_loss, epoch)
+        writer.add_scalar('Metrics/micro_f1', val_metrics['micro_f1'], epoch)
+        writer.add_scalar('Metrics/macro_f1', val_metrics['macro_f1'], epoch)
+        writer.add_scalar('Metrics/mean_auroc', val_metrics['mean_auroc'], epoch)
+        writer.add_scalar('LearningRate', optimizer.param_groups[0]['lr'], epoch)
+
+        print(f"[Epoch {epoch}] Train Loss {train_loss:.4f}, Val Loss {val_loss:.4f}, Metrics: {val_metrics}",
+              flush=True)
 
         # 1) Save checkpoint for every epoch
         ckpt_path = os.path.join(args.output_dir, f"checkpoint_epoch{epoch}.pt")

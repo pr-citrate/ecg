@@ -1,6 +1,8 @@
 import torch
 import numpy as np
 from sklearn.metrics import f1_score, roc_auc_score
+from scipy.optimize import brentq
+from sklearn.metrics import precision_recall_curve
 
 def get_optimizer_scheduler(model: torch.nn.Module,
                             lr: float = 1e-4,
@@ -125,5 +127,18 @@ def evaluate(model: torch.nn.Module,
     avg_loss = total_loss / len(dataloader.dataset)
     all_preds = np.vstack(all_preds)
     all_targets = np.vstack(all_targets)
+    probs = 1 / (1 + np.exp(-all_preds))
     metrics = calculate_metrics(all_preds, all_targets, threshold)
-    return avg_loss, metrics
+    return avg_loss, metrics, probs, all_targets
+
+def find_optimal_thresholds(probs: np.ndarray, targets: np.ndarray):
+    """
+    Find per-class threshold that maximizes F1.
+    """
+    K = targets.shape[1]
+    thresholds = np.zeros(K)
+    for i in range(K):
+        precision, recall, th = precision_recall_curve(targets[:, i], probs[:, i])
+        f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
+        thresholds[i] = th[np.nanargmax(f1[:-1])]
+    return thresholds

@@ -1,21 +1,44 @@
 import torch
 import torch.nn as nn
 
-# Classification loss: binary cross-entropy for multi-label
-bce_loss = nn.BCELoss()
-
-def classification_loss(preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+class FocalLoss(nn.Module):
     """
-    Computes multi-label classification loss using binary cross-entropy.
+    Focal Loss for multi-label classification.
+    """
+    def __init__(self, gamma: float = 2.0, pos_weight: torch.Tensor = None):
+        super().__init__()
+        self.gamma = gamma
+        self.pos_weight = pos_weight
+
+def classification_loss(preds: torch.Tensor,
+                        targets: torch.Tensor,
+                        loss_type: str = 'focal',
+                        gamma: float = 2.0,
+                        pos_weight: torch.Tensor = None) -> torch.Tensor:
+    """
+    Computes multi-label loss. Supports 'bce' or 'focal'.
 
     Args:
         preds: Tensor of shape (batch_size, num_labels), values in [0,1]
         targets: Tensor of same shape with binary 0/1 labels
+        loss_type: 'bce' or 'focal'
+        gamma: focusing parameter for focal loss
+        pos_weight: optional tensor of shape (num_labels,) for weighting positives
 
     Returns:
         Scalar loss tensor
     """
-    return bce_loss(preds, targets)
+    if loss_type == 'bce':
+        return nn.BCEWithLogitsLoss(pos_weight=pos_weight)(preds, targets)
+    elif loss_type == 'focal':
+        # focal loss implementation
+        bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight,
+                                   reduction='none')(preds, targets)
+        p_t = torch.exp(-bce)
+        loss = ((1 - p_t) ** gamma * bce).mean()
+        return loss
+    else:
+        raise ValueError(f"Unknown loss_type {loss_type}")
 
 
 def prototype_loss(model: nn.Module, l2_coeff: float = 1e-3) -> torch.Tensor:
