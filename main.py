@@ -35,16 +35,19 @@ def train_mode(args):
     )
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
-    # ——— Compute pos_weight_tensor for Focal/BCE loss ———
+    # pos_weight for Focal/BCE loss
     pos_counts = all_labels.sum(axis=0)
     neg_counts = all_labels.shape[0] - pos_counts
     pos_weight = neg_counts / (pos_counts + 1e-6)
     pos_weight_tensor = torch.tensor(pos_weight, dtype=torch.float, device=device)
     print("[Init] pos_weight_tensor computed", flush=True)
 
-    # ——— Initialize per-class thresholds ———
+    # initial thresholds & warmup
     thresholds = np.full(args.num_labels, 0.5)
-    print(f"[Init] thresholds set to 0.5 (shape {thresholds.shape})", flush=True)
+    print(f"[Init] thresholds set to 0.5", flush=True)
+    base_lr = args.lr
+    warmup_epochs = args.warmup_epochs
+    print(f"[Init] warmup_epochs = {warmup_epochs}", flush=True)
 
     # Model
     model = HybridECGModel(
@@ -70,7 +73,12 @@ def train_mode(args):
     os.makedirs(args.output_dir, exist_ok=True)
 
     for epoch in range(1, args.epochs + 1):
-        # define loss function with pos_weight_tensor
+        # linear warm-up for first warmup_epochs
+        if epoch <= warmup_epochs and warmup_epochs > 0:
+            warm_lr = base_lr * epoch / warmup_epochs
+            for pg in optimizer.param_groups:
+                pg['lr'] = warm_lr
+
         loss_fn = lambda p, t: classification_loss(
             p, t,
             loss_type='focal',
@@ -78,12 +86,8 @@ def train_mode(args):
             pos_weight=pos_weight_tensor
         ) + prototype_loss(model) + attention_regularization(p)
 
-        # training step
-        train_loss = train_one_epoch(
-            model, train_loader, optimizer, loss_fn, device
-        )
+        train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
 
-        # validation step with per-class thresholds
         val_loss, metrics, probs, targets = evaluate(
             model, val_loader, loss_fn, device, threshold=thresholds
         )
@@ -94,7 +98,7 @@ def train_mode(args):
         else:
             scheduler.step()
 
-        # optionally update thresholds
+        # threshold tuning
         if epoch % args.threshold_freq == 0:
             thresholds = find_optimal_thresholds(probs, targets)
             print(f"[Epoch {epoch}] Updated thresholds", flush=True)
@@ -188,28 +192,32 @@ def main():
     sub = parser.add_subparsers(dest='mode', required=True)
     # Train
     p_train = sub.add_parser('train')
-    p_train.add_argument('--scheduler', type=str, choices=['step', 'cosine', 'plateau'], default='step')
-    p_train.add_argument('--scheduler_patience', type=int, default=5)
-    p_train.add_argument('--scheduler_factor', type=float, default=0.5)
-    p_train.add_argument('--log_dir', type=str, default='runs')
-    p_train.add_argument('--meta_csv', required=True)
-    p_train.add_argument('--data_dir', required=True)
-    p_train.add_argument('--epochs', type=int, default=50)
-    p_train.add_argument('--batch_size', type=int, default=32)
-    p_train.add_argument('--lr', type=float, default=1e-4)
-    p_train.add_argument('--weight_decay', type=float, default=1e-5)
+    p_train.add_argument('--meta_csv',      required=True)
+    p_train.add_argument('--data_dir',      required=True)
+    p_train.add_argument('--num_labels',    type=int, required=True)
+    p_train.add_argument('--epochs',        type=int,   default=50)
+    p_train.add_argument('--batch_size',    type=int,   default=32)
+    p_train.add_argument('--lr',            type=float, default=1e-4)
+    p_train.add_argument('--weight_decay',  type=float, default=1e-5)
+
+    p_train.add_argument('--scheduler',      type=str, choices=['step','cosine','plateau'], default='step')
     p_train.add_argument('--scheduler_step', type=int, default=10)
-    p_train.add_argument('--scheduler_gamma', type=float, default=0.1)
+    p_train.add_argument('--scheduler_gamma',type=float,default=0.1)
+    p_train.add_argument('--scheduler_patience', type=int, default=5)
+    p_train.add_argument('--scheduler_factor',   type=float, default=0.5)
+
+    p_train.add_argument('--warmup_epochs',     type=int, default=0)
+    p_train.add_argument('--threshold_freq',    type=int, default=20)
+
+    p_train.add_argument('--d_model',        type=int, default=64)
+    p_train.add_argument('--n_heads',        type=int, default=4)
+    p_train.add_argument('--n_layers',       type=int, default=2)
     p_train.add_argument('--num_prototypes', type=int, default=32)
-    p_train.add_argument('--num_concepts', type=int, default=10)
-    p_train.add_argument('--num_labels', type=int, required=True)
-    p_train.add_argument('--device', default='cuda')
-    p_train.add_argument('--output_dir', default='chkpts')
-    p_train.add_argument('--d_model', type=int, default=64)
-    p_train.add_argument('--n_heads', type=int, default=4)
-    p_train.add_argument('--n_layers', type=int, default=2)
-    p_train.add_argument('--early_stop_patience', type=int, default=10)
-    p_train.add_argument('--threshold_freq', type=int, default=10)
+    p_train.add_argument('--num_concepts',   type=int, default=10)
+
+    p_train.add_argument('--device',      default='cuda')
+    p_train.add_argument('--output_dir',  default='chkpts')
+    p_train.add_argument('--log_dir',     default='runs')
 
     # Counterfactual
     p_cf = sub.add_parser('cf')
