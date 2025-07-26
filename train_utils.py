@@ -47,8 +47,7 @@ def get_optimizer_scheduler(model: torch.nn.Module,
             optimizer,
             mode='min',
             factor=scheduler_factor,
-            patience=scheduler_patience,
-            verbose=True
+            patience=scheduler_patience
         )
     else:
         raise ValueError(f"Unknown scheduler_type {scheduler_type}")
