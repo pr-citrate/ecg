@@ -26,8 +26,14 @@ def train_mode(args):
     ).to(device)
     # Optimizer & Scheduler
     optimizer, scheduler = get_optimizer_scheduler(
-        model, lr=args.lr, weight_decay=args.weight_decay,
-        scheduler_step_size=args.scheduler_step, scheduler_gamma=args.scheduler_gamma
+        model,
+        lr = args.lr,
+        weight_decay = args.weight_decay,
+        scheduler_type = args.scheduler,
+        scheduler_step_size = args.scheduler_step,
+        scheduler_gamma = args.scheduler_gamma,
+        scheduler_patience = args.scheduler_patience,
+        scheduler_factor = args.scheduler_factor
     )
     best_f1 = 0.0
     os.makedirs(args.output_dir, exist_ok=True)
@@ -42,13 +48,18 @@ def train_mode(args):
             lambda p,t: classification_loss(p,t) + prototype_loss(model) + attention_regularization(p),
             device
         )
-        scheduler.step()
-        print(f"[Epoch {epoch}] Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Metrics: {metrics}")
+
+        if args.scheduler == 'plateau':
+            scheduler.step(val_loss)
+        else:
+            scheduler.step()
+
+        print(f"[Epoch {epoch}] Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Metrics: {metrics}", flush=True)
         if metrics['macro_f1'] > best_f1:
             best_f1 = metrics['macro_f1']
             path = os.path.join(args.output_dir, f"best_epoch{epoch}.pt")
             torch.save(model.state_dict(), path)
-            print(f"Saved best model to {path}")
+            print(f"Saved best model to {path}", flush=True)
 
 
 def cf_mode(args):
@@ -76,7 +87,7 @@ def cf_mode(args):
         device=device
     )
     torch.save({'x_cf': x_cf, 'delta': delta}, args.output)
-    print(f"Saved counterfactual to {args.output}")
+    print(f"Saved counterfactual to {args.output}", flush=True)
 
 
 def cav_mode(args):
@@ -101,7 +112,7 @@ def cav_mode(args):
     neg = load_examples(args.neg_dir)
     cav = learn_cavs(pos, neg, model, device)
     torch.save(cav, args.output)
-    print(f"Saved CAV vector to {args.output}")
+    print(f"Saved CAV vector to {args.output}", flush=True)
 
 
 def tcav_mode(args):
@@ -120,7 +131,7 @@ def tcav_mode(args):
     loader = DataLoader(ds, batch_size=args.batch_size)
     scores = compute_tcav_scores(model, cavs, loader, args.labels, device)
     torch.save(scores, args.output)
-    print(f"Saved TCAV scores to {args.output}")
+    print(f"Saved TCAV scores to {args.output}", flush=True)
 
 
 def main():
@@ -129,6 +140,8 @@ def main():
     # Train
     p_train = sub.add_parser('train')
     p_train.add_argument('--scheduler', type=str, choices=['step', 'cosine', 'plateau'], default='step')
+    p_train.add_argument('--scheduler_patience', type=int, default=5)
+    p_train.add_argument('--scheduler_factor', type=float, default=0.5)
     p_train.add_argument('--log_dir', type=str, default='runs')
     p_train.add_argument('--meta_csv', required=True)
     p_train.add_argument('--data_dir', required=True)
@@ -146,6 +159,8 @@ def main():
     p_train.add_argument('--d_model', type=int, default=64)
     p_train.add_argument('--n_heads', type=int, default=4)
     p_train.add_argument('--n_layers', type=int, default=2)
+    p_train.add_argument('--early_stop_patience', type=int, default=10)
+    p_train.add_argument('--threshold_freq', type=int, default=10)
 
     # Counterfactual
     p_cf = sub.add_parser('cf')
@@ -195,6 +210,8 @@ def main():
     p_tcav.add_argument('--device', default='cuda')
 
     args = parser.parse_args()
+    print(args)
+
     if args.mode == 'train':
         train_mode(args)
     elif args.mode == 'cf':
