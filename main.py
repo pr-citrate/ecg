@@ -102,6 +102,7 @@ def train_mode(args):
         if epoch % args.threshold_freq == 0:
             thresholds = find_optimal_thresholds(probs, targets)
             print(f"[Epoch {epoch}] Updated thresholds", flush=True)
+            print(thresholds, flush=True)
 
         # logging
         print(f"[Epoch {epoch}] Train Loss: {train_loss:.4f}, "
