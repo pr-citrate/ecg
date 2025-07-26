@@ -50,6 +50,16 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
+    # ——— Compute pos_weight tensor for imbalanced BCE/focal loss ———
+    # gather all training labels
+    all_labels = np.vstack([label.numpy() for _, label in train_loader.dataset])
+    pos_counts = all_labels.sum(axis=0)
+    neg_counts = all_labels.shape[0] - pos_counts
+    # avoid division by zero
+    pos_weight = neg_counts / (pos_counts + 1e-6)
+    pos_weight_tensor = torch.tensor(pos_weight, dtype=torch.float, device=device)
+    print(f"[Init] pos_weight_tensor: {pos_weight_tensor}", flush=True)
+
     # Model
     model = HybridECGModel(
         in_channels=12,
@@ -93,21 +103,22 @@ def main():
 
     for epoch in range(start_epoch, args.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer,
-                                     lambda p, t: classification_loss(p, t) + prototype_loss(
-                                         model) + attention_regularization(p), device)
+                                     lambda p, t: classification_loss(p, t, loss_type='focal', gamma=2.0, pos_weight=pos_weight_tensor)
+                                                  + prototype_loss(model)
+                                                  + attention_regularization(p), device)
         val_loss, val_metrics, probs, targets = evaluate(model, val_loader,
-                                         lambda p, t: classification_loss(p, t) + prototype_loss(
-                                             model) + attention_regularization(p),
-                                         device)
+                                         lambda p, t: classification_loss(p, t, loss_type='focal', gamma=2.0, pos_weight=pos_weight_tensor)
+                                                  + prototype_loss(model)
+                                                  + attention_regularization(p), device)
         # Scheduler step
         if args.scheduler == 'plateau':
             scheduler.step(val_loss)
         else:
             scheduler.step()
 
-        # Threshold tuning every 5 epochs
+        # Threshold tuning every 2 epochs
 
-        if epoch % 5 == 0:
+        if epoch % 2 == 0:
             thresholds = find_optimal_thresholds(probs, targets)
             print(f"[Epoch {epoch}] Updated thresholds: {thresholds}", flush=True)
 
