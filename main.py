@@ -15,6 +15,7 @@ from train_utils import (
     find_optimal_thresholds
 )
 from explain import generate_counterfactual, learn_cavs, compute_tcav_scores
+from plot_utils import plot_counterfactual
 
 
 def train_mode(args):
@@ -138,26 +139,41 @@ def cf_mode(args):
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
     model.eval()
 
-    # Load single example
-    ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
-    x, _ = ds[args.index]
-    x = x.unsqueeze(0)
+    os.makedirs(args.output_dir, exist_ok=True)
+    # support multiple
 
-    mask = None
-    if args.mask:
-        mask = torch.load(args.mask).to(device)
+    for idx, tgt in zip(args.indices, args.target_labels):
+        # load single sample
+        ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
+        x, _ = ds[idx]
+        x = x.unsqueeze(0).to(device)
 
-    x_cf, delta = generate_counterfactual(
-        model, x, args.target_label,
-        lambda_coeff=args.lambda_coeff,
-        steps=args.steps,
-        lr=args.lr_cf,
-        mask=mask,
-        device=device
-    )
-    torch.save({'x_cf': x_cf, 'delta': delta}, args.output)
-    print(f"Saved counterfactual to {args.output}", flush=True)
+        mask = None
 
+        if args.mask:
+            mask = torch.load(args.mask).to(device)
+
+        # generate CF
+        x_cf, delta = generate_counterfactual(
+            model, x, tgt,
+            lambda_coeff = args.lambda_coeff,
+            steps = args.steps,
+            lr = args.lr_cf,
+            mask = mask,
+            device = device
+        )
+        cf_file = os.path.join(args.output_dir, f"cf_idx{idx}_lbl{tgt}.pth")
+        torch.save({'x_cf': x_cf, 'delta': delta}, cf_file)
+        print(f"Saved counterfactual to {cf_file}", flush=True)
+
+        # plot comparison
+        plot_file = cf_file.replace('.pth', '.png')
+        plot_counterfactual(cf_file,
+                            args.meta_csv,
+                            args.data_dir,
+                            index = 0,  # only one in this cf pth
+                            output_path = plot_file)
+        print(f"Saved plot to {plot_file}", flush=True)
 
 def cav_mode(args):
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
@@ -255,6 +271,10 @@ def main():
     p_cf.add_argument('--index',          type=int,   required=True)
     p_cf.add_argument('--target_label',   type=int,   required=True)
     p_cf.add_argument('--output',         required=True)
+    p_cf.add_argument('--indices',       type=int,   nargs='+', required=True)
+    p_cf.add_argument('--target_labels', type=int,   nargs='+', required=True)
+    p_cf.add_argument('--output_dir',    type=str,   required=True,
+                        help="directory to save cf .pth and plot images")
     p_cf.add_argument('--lambda_coeff',   type=float, default=0.1)
     p_cf.add_argument('--steps',          type=int,   default=100)
     p_cf.add_argument('--lr_cf',          type=float, default=1e-2)
