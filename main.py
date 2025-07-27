@@ -142,38 +142,38 @@ def cf_mode(args):
     os.makedirs(args.output_dir, exist_ok=True)
     # support multiple
 
-    for idx, tgt in zip(args.indices, args.target_labels):
-        # load single sample
-        ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
-        x, _ = ds[idx]
-        x = x.unsqueeze(0).to(device)
+    for idx in args.indices:
+        for tgt in args.target_labels:
+            ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
+            x, _ = ds[idx]
+            x = x.unsqueeze(0).to(device)
 
-        mask = None
+            mask = None
 
-        if args.mask:
-            mask = torch.load(args.mask).to(device)
+            if args.mask:
+                mask = torch.load(args.mask).to(device)
 
-        # generate CF
-        x_cf, delta = generate_counterfactual(
-            model, x, tgt,
-            lambda_coeff = args.lambda_coeff,
-            steps = args.steps,
-            lr = args.lr_cf,
-            mask = mask,
-            device = device
-        )
-        cf_file = os.path.join(args.output_dir, f"cf_idx{idx}_lbl{tgt}.pth")
-        torch.save({'x_cf': x_cf, 'delta': delta}, cf_file)
-        print(f"Saved counterfactual to {cf_file}", flush=True)
+            # generate CF
+            x_cf, delta = generate_counterfactual(
+                model, x, tgt,
+                lambda_coeff = args.lambda_coeff,
+                steps = args.steps,
+                lr = args.lr_cf,
+                mask = mask,
+                device = device
+            )
+            cf_file = os.path.join(args.output_dir, f"cf_idx{idx}_lbl{tgt}.pth")
+            torch.save({'x_cf': x_cf, 'delta': delta}, cf_file)
+            print(f"Saved counterfactual to {cf_file}", flush=True)
 
-        # plot comparison
-        plot_file = cf_file.replace('.pth', '.png')
-        plot_counterfactual(cf_file,
-                            args.meta_csv,
-                            args.data_dir,
-                            index = 0,  # only one in this cf pth
-                            output_path = plot_file)
-        print(f"Saved plot to {plot_file}", flush=True)
+            # plot comparison
+            plot_file = cf_file.replace('.pth', '.png')
+            plot_counterfactual(cf_file,
+                                args.meta_csv,
+                                args.data_dir,
+                                index = 0,  # only one in this cf pth
+                                output_path = plot_file)
+            print(f"Saved plot to {plot_file}", flush=True)
 
 def cav_mode(args):
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
