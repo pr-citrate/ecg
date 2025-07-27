@@ -1,5 +1,3 @@
-# plot_utils.py
-
 import os
 import torch
 import matplotlib.pyplot as plt
@@ -14,12 +12,14 @@ def plot_counterfactual(cf_path: str,
                         device: str = 'cpu',
                         output_path: str = None):
     """
-    For each of the 12 leads, plot original vs CF on the primary y-axis
-    and delta = CF - original on a secondary y-axis, in a 4×3 grid.
-    Each subplot is wider than it is tall.
+    Plot each of the 12 leads in a 4×3 grid with:
+     - Blue solid = CF
+     - Orange solid = Original (drawn on top)
+     - Light green solid = Δ (CF − Orig) on secondary y-axis
+    Figure size is (21, 12).
     """
 
-    # 1) Load counterfactual & original signal
+    # 1) Load counterfactual and original signals
     ckpt = torch.load(cf_path, map_location='cpu')
     x_cf = ckpt['x_cf'][0].numpy()   # (12, T)
     ds = ECGDataset(meta_csv, data_dir, use_lowres=False)
@@ -30,38 +30,40 @@ def plot_counterfactual(cf_path: str,
     model.to(device).eval()
     with torch.no_grad():
         p_o = model(torch.from_numpy(x_orig)[None].to(device))['logits'][0, target_label].item()
-        p_c = model(torch.from_numpy(x_cf)[None].to(device))['logits'][0, target_label].item()
+        p_c = model(torch.from_numpy(x_cf)[None].to(device))  ['logits'][0, target_label].item()
 
     lead_names = ['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6']
 
-    # 3) Prepare figure: 4 rows × 3 cols
+    # 3) Create 4×3 grid
     fig, axes = plt.subplots(4, 3,
-                             figsize=(18, 12),
+                             figsize=(21, 12),
                              constrained_layout=True)
     axes = axes.flatten()
 
     for i, ax in enumerate(axes):
-        # Primary plot: original (orange) and CF (blue)
-        ax.plot(x_orig[i], color='orange', label='Orig', linewidth=1)
-        ax.plot(x_cf[i],   color='blue',   label='CF',   linewidth=1)
+        # Plot CF first (blue)
+        ax.plot(x_cf[i], color='blue', linewidth=1, label='CF')
+        # Then original on top (orange)
+        ax.plot(x_orig[i], color='orange', linewidth=1, label='Orig')
 
-        # Secondary axis: delta
+        # Secondary y-axis for delta (light green)
         ax2 = ax.twinx()
         delta = x_cf[i] - x_orig[i]
-        ax2.plot(delta, color='purple', alpha=0.7, label='Δ', linewidth=1)
+        ax2.plot(delta, color='lightgreen', linewidth=1, label='Δ')
+        ax2.set_ylabel('Δ mV')
 
         # Titles and labels
         ax.set_title(f'Lead {lead_names[i]}')
         ax.set_xlabel('Sample')
         ax.set_ylabel('mV')
-        ax2.set_ylabel('Δ mV')
 
-        # Legends only on first subplot
+        # Only show combined legend on first subplot
         if i == 0:
-            orig_legend = ax.legend(loc='upper left')
-            ax2.legend(loc='upper right')
+            lines, labels = ax.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            ax.legend(lines + lines2, labels + labels2, loc='upper right')
 
-    # Super-title with index, label, and probabilities to 4 decimals
+    # Super-title with index, label, and precise probability change
     fig.suptitle(
         f"Idx={orig_index}, Label={target_label}, prob {p_o:.4f} → {p_c:.4f}",
         fontsize=18,
