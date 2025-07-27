@@ -73,5 +73,5 @@ def plot_counterfactual(cf_path: str,
     # Save or show
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.savefig(output_path, dpi=600, bbox_inches='tight')
     plt.close(fig)
