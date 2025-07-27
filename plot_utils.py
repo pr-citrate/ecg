@@ -13,9 +13,9 @@ def plot_counterfactual(cf_path: str,
                         output_path: str = None):
     """
     Plot each of the 12 leads in a 4×3 grid with:
-     - Blue solid = CF
-     - Orange solid = Original (drawn on top)
-     - Light green solid = Δ (CF − Orig) on secondary y-axis
+     - lightgreen thin solid = Δ (CF − Orig) plotted first (behind)
+     - blue solid = CF
+     - orange solid = Original (drawn on top)
     Figure size is (21, 12).
     """
 
@@ -30,7 +30,7 @@ def plot_counterfactual(cf_path: str,
     model.to(device).eval()
     with torch.no_grad():
         p_o = model(torch.from_numpy(x_orig)[None].to(device))['logits'][0, target_label].item()
-        p_c = model(torch.from_numpy(x_cf)[None].to(device))  ['logits'][0, target_label].item()
+        p_c = model(torch.from_numpy(x_cf)[None].to(device))['logits'][0, target_label].item()
 
     lead_names = ['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6']
 
@@ -41,16 +41,16 @@ def plot_counterfactual(cf_path: str,
     axes = axes.flatten()
 
     for i, ax in enumerate(axes):
-        # Plot CF first (blue)
-        ax.plot(x_cf[i], color='blue', linewidth=1, label='CF')
-        # Then original on top (orange)
-        ax.plot(x_orig[i], color='orange', linewidth=1, label='Orig')
-
-        # Secondary y-axis for delta (light green)
+        # Plot delta first (thin, behind)
         ax2 = ax.twinx()
         delta = x_cf[i] - x_orig[i]
-        ax2.plot(delta, color='lightgreen', linewidth=1, label='Δ')
+        ax2.plot(delta, color='lightgreen', linewidth=0.5, label='Δ', zorder=0)
         ax2.set_ylabel('Δ mV')
+
+        # Plot CF (blue)
+        ax.plot(x_cf[i], color='blue', linewidth=1, label='CF', zorder=1)
+        # Plot original on top (orange)
+        ax.plot(x_orig[i], color='orange', linewidth=1, label='Orig', zorder=2)
 
         # Titles and labels
         ax.set_title(f'Lead {lead_names[i]}')
