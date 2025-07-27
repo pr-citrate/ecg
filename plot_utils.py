@@ -12,66 +12,67 @@ def plot_counterfactual(cf_path: str,
                         device: str = 'cpu',
                         output_path: str = None):
     """
-    Plot each of the 12 leads in a 4×3 grid with:
-     - lightgreen thin solid = Δ (CF − Orig) plotted first (behind)
-     - blue solid = CF
-     - orange solid = Original (drawn on top)
-    Figure size is (21, 12).
+    각 리드별로 4×3 그리드:
+      - lightgreen Δ (linewidth=0.3) 축을 제일 아래(zorder 낮게)
+      - blue CF (linewidth=1, zorder 중간)
+      - orange Orig (linewidth=1, zorder 가장 높게)
+    figsize=(21,12)
     """
 
-    # 1) Load counterfactual and original signals
+    # 1) Load signals
     ckpt = torch.load(cf_path, map_location='cpu')
     x_cf = ckpt['x_cf'][0].numpy()   # (12, T)
     ds = ECGDataset(meta_csv, data_dir, use_lowres=False)
     x_orig, _ = ds[orig_index]
-    x_orig = x_orig.numpy()          # (12, T)
+    x_orig = x_orig.numpy()
 
-    # 2) Compute model probabilities for display
+    # 2) Compute logits for display
     model.to(device).eval()
     with torch.no_grad():
         p_o = model(torch.from_numpy(x_orig)[None].to(device))['logits'][0, target_label].item()
-        p_c = model(torch.from_numpy(x_cf)[None].to(device))['logits'][0, target_label].item()
+        p_c = model(torch.from_numpy(x_cf)[None].to(device))  ['logits'][0, target_label].item()
 
     lead_names = ['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6']
 
-    # 3) Create 4×3 grid
+    # 3) Plot setup
     fig, axes = plt.subplots(4, 3,
                              figsize=(21, 12),
                              constrained_layout=True)
     axes = axes.flatten()
 
     for i, ax in enumerate(axes):
-        # Plot delta first (thin, behind)
+        # 3.1) Δ on ax2, 아래로
         ax2 = ax.twinx()
         delta = x_cf[i] - x_orig[i]
-        ax2.plot(delta, color='lightgreen', linewidth=0.5, label='Δ', zorder=0)
-        ax2.set_ylabel('Δ mV')
+        ax2.set_zorder(ax.get_zorder() - 1)  # ax 아래로
+        ax2.patch.set_alpha(0)               # 투명 배경
+        ax2.plot(delta, color='lightgreen', linewidth=0.3, label='Δ')
 
-        # Plot CF (blue)
-        ax.plot(x_cf[i], color='blue', linewidth=1, label='CF', zorder=1)
-        # Plot original on top (orange)
-        ax.plot(x_orig[i], color='orange', linewidth=1, label='Orig', zorder=2)
+        # 3.2) CF
+        ax.plot(x_cf[i],   color='blue',   linewidth=1.0, zorder=2, label='CF')
+        # 3.3) Orig (맨 위)
+        ax.plot(x_orig[i], color='orange', linewidth=1.0, zorder=3, label='Orig')
 
-        # Titles and labels
+        # titles & labels
         ax.set_title(f'Lead {lead_names[i]}')
         ax.set_xlabel('Sample')
         ax.set_ylabel('mV')
+        ax2.set_ylabel('Δ mV')
 
-        # Only show combined legend on first subplot
+        # legend only once
         if i == 0:
-            lines, labels = ax.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            ax.legend(lines + lines2, labels + labels2, loc='upper right')
+            lines, labs = ax.get_legend_handles_labels()
+            l2, lab2 = ax2.get_legend_handles_labels()
+            ax.legend(lines + l2, labs + lab2, loc='upper right')
 
-    # Super-title with index, label, and precise probability change
+    # 4) super-title
     fig.suptitle(
         f"Idx={orig_index}, Label={target_label}, prob {p_o:.4f} → {p_c:.4f}",
-        fontsize=18,
-        y=1.02
+        fontsize=18, y=1.02
     )
 
-    # Save or show
+    # 5) save/show
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        plt.savefig(output_path, dpi=600, bbox_inches='tight')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
