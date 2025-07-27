@@ -14,60 +14,61 @@ def plot_counterfactual(cf_path: str,
                         device: str = 'cpu',
                         output_path: str = None):
     """
-    12-lead overlay (orig vs CF) + per-lead delta plot
-
-    Left col: original (파란) vs CF (주황)
-    Right col: delta = CF - original
+    Plot orig vs CF (orange solid / blue dashed) and delta in a 4×6 grid:
+    12 leads × (overlay, delta) = 24 panels → 4 rows × 6 cols.
     """
-
-    # 1) load CF
+    # load CF
     ckpt = torch.load(cf_path, map_location='cpu')
     x_cf = ckpt['x_cf'][0].numpy()   # (12, T)
 
-    # 2) load original
+    # load original
     ds = ECGDataset(meta_csv, data_dir, use_lowres=False)
     x_orig, _ = ds[orig_index]
     x_orig = x_orig.numpy()          # (12, T)
 
-    # 3) compute probs (optional)
+    # compute probabilities (optional display)
     model.to(device).eval()
     with torch.no_grad():
-        logits_orig = model(torch.from_numpy(x_orig)[None].to(device))['logits'][0, target_label].item()
-        logits_cf   = model(torch.from_numpy(x_cf)[None].to(device))['logits'][0, target_label].item()
+        p_orig = model(torch.from_numpy(x_orig)[None].to(device))['logits'][0, target_label].item()
+        p_cf   = model(torch.from_numpy(x_cf)[None].to(device))['logits'][0, target_label].item()
 
-    # 4) prepare figure: 12 rows × 2 cols
     lead_names = ['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6']
-    fig, axes = plt.subplots(12, 2, figsize=(12, 36), constrained_layout=True)
+
+    fig, axes = plt.subplots(4, 6, figsize=(24, 16), constrained_layout=True)
+    axes = axes.flatten()
 
     for i in range(12):
-        # overlay orig vs CF
-        ax1 = axes[i, 0]
-        ax1.plot(x_orig[i], label='Orig', linewidth=1)
-        ax1.plot(x_cf[i],   label='CF',   linewidth=1)
-        ax1.set_ylabel('mV')
-        ax1.set_title(f'Lead {lead_names[i]}')
+        # overlay panel
+        ax_o = axes[2 * i]
+        ax_o.plot(x_orig[i], color='orange', label='Orig', linewidth=1)
+        ax_o.plot(x_cf[i], '--', color='blue', label='CF', linewidth=1)
+        ax_o.set_title(f'Lead {lead_names[i]}')
+        ax_o.set_ylabel('mV')
         if i == 0:
-            ax1.legend(loc='upper right')
-
-        # delta only
-        ax2 = axes[i, 1]
-        delta = x_cf[i] - x_orig[i]
-        ax2.plot(delta, color='tab:purple', linewidth=1)
-        ax2.set_ylabel('Δ mV')
-        if i == 0:
-            ax2.set_title('Delta (CF – Orig)')
-
-        # x-label only on last row
-        if i == 11:
-            ax1.set_xlabel('Sample')
-            ax2.set_xlabel('Sample')
+            ax_o.legend(loc='upper right')
+        if i < 8:
+            ax_o.set_xticks([])
         else:
-            ax1.set_xticks([])
-            ax2.set_xticks([])
+            ax_o.set_xlabel('Sample')
 
-    # super-title with index, label, prob change
-    fig.suptitle(f"Idx={orig_index}, Label={target_label},  prob {logits_orig:.2f} → {logits_cf:.2f}",
-                 fontsize=16, y=1.02)
+        # delta panel
+        ax_d = axes[2 * i + 1]
+        delta = x_cf[i] - x_orig[i]
+        ax_d.plot(delta, color='purple', linewidth=1)
+        ax_d.set_title(f'Δ {lead_names[i]}')
+        ax_d.set_ylabel('Δ mV')
+        if i < 8:
+            ax_d.set_xticks([])
+        else:
+            ax_d.set_xlabel('Sample')
+
+    # hide any extra axes (none in this case, 4×6=24 panels used exactly)
+    # super-title
+    fig.suptitle(
+        f"Idx={orig_index}, Label={target_label}, prob {p_orig:.2f}→{p_cf:.2f}",
+        fontsize=18,
+        y=1.02
+    )
 
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
