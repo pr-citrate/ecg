@@ -168,11 +168,16 @@ def cf_mode(args):
 
             # plot comparison
             plot_file = cf_file.replace('.pth', '.png')
-            plot_counterfactual(cf_file,
-                                args.meta_csv,
-                                args.data_dir,
-                                index = 0,  # only one in this cf pth
-                                output_path = plot_file)
+            plot_counterfactual(
+                cf_file,
+                args.meta_csv,
+                args.data_dir,
+                orig_index=idx,  # 원본 ECG 인덱스
+                target_label=tgt,  # CF 생성 타겟 레이블
+                model=model,
+                device=args.device,
+                output_path=plot_file
+            )
             print(f"Saved plot to {plot_file}", flush=True)
 
 def cav_mode(args):
