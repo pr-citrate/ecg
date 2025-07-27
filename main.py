@@ -268,9 +268,6 @@ def main():
     p_cf.add_argument('--checkpoint',     required=True)
     p_cf.add_argument('--meta_csv',       required=True)
     p_cf.add_argument('--data_dir',       required=True)
-    p_cf.add_argument('--index',          type=int,   required=True)
-    p_cf.add_argument('--target_label',   type=int,   required=True)
-    p_cf.add_argument('--output',         required=True)
     p_cf.add_argument('--indices',       type=int,   nargs='+', required=True)
     p_cf.add_argument('--target_labels', type=int,   nargs='+', required=True)
     p_cf.add_argument('--output_dir',    type=str,   required=True,
