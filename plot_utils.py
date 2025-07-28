@@ -35,7 +35,8 @@ def plot_counterfactual(cf_path: str,
 
     # 3) Create 2×6 grid, wider figure
     fig, axes = plt.subplots(6, 2,
-                             figsize=(12, 12))
+                             figsize=(12, 12),
+                             constrained_layout=True)
     axes = axes.flatten()
 
     for i, ax in enumerate(axes):
@@ -63,7 +64,7 @@ def plot_counterfactual(cf_path: str,
     # Save or show
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close(fig)
     else:
         plt.show()
