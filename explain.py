@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from torch.optim import Adam
 import numpy as np
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 
 
 def generate_counterfactual(model, x, target_label, lambda_coeff=0.1, steps=100, lr=1e-2, mask=None, device='cpu'):
@@ -67,10 +68,13 @@ def learn_cavs(concept_examples, non_concept_examples, model, device='cpu'):
     X_neg = np.vstack([get_concept_features(x.unsqueeze(0)) for x in non_concept_examples])
     X = np.vstack([X_pos, X_neg])
     y = np.concatenate([np.ones(len(X_pos)), np.zeros(len(X_neg))])
-    # Linear classifier
-    clf = LogisticRegression().fit(X, y)
+    # scale features for better convergence
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    # Linear classifier with more iterations
+    clf = LogisticRegression(max_iter=1000, solver='lbfgs').fit(X_scaled, y)
     # CAV is weight vector
-    v_c = clf.coef_[0]
+    v_c = clf.coef_[0] / scaler.scale_
     return v_c
 
 
