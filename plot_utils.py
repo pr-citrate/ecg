@@ -12,18 +12,18 @@ def plot_counterfactual(cf_path: str,
                         device: str = 'cpu',
                         output_path: str = None):
     """
-    Plot each of the 12 leads in a 4×3 grid with:
+    Plot each of the 12 leads in a 2×6 grid with:
      - blue solid = CF
      - orange solid = Original (drawn on top)
-    Figure size is (21, 12).
+    Figure size is (24, 8) for wider subplots.
     """
 
     # 1) Load counterfactual and original signals
     ckpt = torch.load(cf_path, map_location='cpu')
-    x_cf = ckpt['x_cf'][0].numpy()   # (12, T)
-    ds = ECGDataset(meta_csv, data_dir, use_lowres=False)
-    x_orig, _ = ds[orig_index]
-    x_orig = x_orig.numpy()          # (12, T)
+    x_cf   = ckpt['x_cf'][0].numpy()   # (12, T)
+    ds     = ECGDataset(meta_csv, data_dir, use_lowres=False)
+    x_orig,_ = ds[orig_index]
+    x_orig = x_orig.numpy()            # (12, T)
 
     # 2) Compute model probabilities for display
     model.to(device).eval()
@@ -33,15 +33,15 @@ def plot_counterfactual(cf_path: str,
 
     lead_names = ['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6']
 
-    # 3) Create 4×3 grid
-    fig, axes = plt.subplots(4, 3,
-                             figsize=(21, 12),
+    # 3) Create 2×6 grid, wider figure
+    fig, axes = plt.subplots(2, 6,
+                             figsize=(24, 8),
                              constrained_layout=True)
     axes = axes.flatten()
 
     for i, ax in enumerate(axes):
         # Plot CF (blue)
-        ax.plot(x_cf[i],   color='blue',   linewidth=1.0, label='CF', zorder=1)
+        ax.plot(x_cf[i],   color='blue',   linewidth=1.0, label='CF',   zorder=1)
         # Plot original on top (orange)
         ax.plot(x_orig[i], color='orange', linewidth=1.0, label='Orig', zorder=2)
 
@@ -54,6 +54,9 @@ def plot_counterfactual(cf_path: str,
         if i == 0:
             ax.legend(loc='upper right')
 
+        # make each subplot wider by auto-aspect
+        ax.set_aspect('auto')
+
     # Super-title with index, label, and precise probability change
     fig.suptitle(
         f"Idx={orig_index}, Label={target_label}, prob {p_o:.4f} → {p_c:.4f}",
@@ -65,4 +68,6 @@ def plot_counterfactual(cf_path: str,
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         plt.savefig(output_path, dpi=200, bbox_inches='tight')
-    plt.close(fig)
+        plt.close(fig)
+    else:
+        plt.show()
