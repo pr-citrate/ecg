@@ -27,8 +27,8 @@ def main():
     args = parser.parse_args()
 
     meta = pd.read_csv(args.meta_csv)
-    scp_df = pd.read_csv(args.scp_csv)
-    available = set(scp_df['diagnostic_subclass'].dropna().unique())
+    scp_df = pd.read_csv(args.scp_csv, index_col=0)
+    available = set(scp_df.index)
 
     ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
 
@@ -59,6 +59,7 @@ def main():
 
         print(f"[INFO] Training CAV for '{concept}': pos={len(pos_sigs)}, neg={len(neg_sigs)}", flush=True)
         cav = learn_cavs(pos_sigs, neg_sigs, model, args.device)
+        cav = torch.from_numpy(cav)
         cav_dict[concept] = cav.cpu()
 
     torch.save(cav_dict, args.output)
