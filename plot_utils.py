@@ -34,7 +34,7 @@ def plot_counterfactual(cf_path: str,
     lead_names = ['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6']
 
     # 3) Create 2×6 grid, wider figure
-    fig, axes = plt.subplots(2, 6,
+    fig, axes = plt.subplots(6, 2,
                              figsize=(24, 8),
                              constrained_layout=True)
     axes = axes.flatten()
@@ -53,9 +53,6 @@ def plot_counterfactual(cf_path: str,
         # Legend only on first subplot
         if i == 0:
             ax.legend(loc='upper right')
-
-        # make each subplot wider by auto-aspect
-        ax.set_aspect('auto')
 
     # Super-title with index, label, and precise probability change
     fig.suptitle(
