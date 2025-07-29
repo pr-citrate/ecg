@@ -243,6 +243,9 @@ def tcav_mode(args):
 
     cavs = torch.load(args.cav_path)
 
+    if args.concepts is not None:
+        cavs = {c: cavs[c] for c in args.concepts if c in cavs}
+
     ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
     loader = DataLoader(ds, batch_size=args.batch_size)
 
@@ -334,6 +337,7 @@ def main():
     p_tcav.add_argument('--meta_csv',   required=True)
     p_tcav.add_argument('--data_dir',   required=True)
     p_tcav.add_argument('--labels',     type=int, nargs='+', required=True)
+    p_tcav.add_argument('--concepts', nargs='+', default=None)
     p_tcav.add_argument('--batch_size', type=int, default=32)
     p_tcav.add_argument('--output',     required=True)
     p_tcav.add_argument('--device',     default='cuda')
