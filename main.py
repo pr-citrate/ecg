@@ -14,12 +14,17 @@ from train_utils import (
     evaluate,
     find_optimal_thresholds
 )
+from torch.utils.tensorboard import SummaryWriter
+
 from explain import generate_counterfactual, learn_cavs, compute_tcav_scores
 from plot_utils import plot_counterfactual
 
 
 def train_mode(args):
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+
+    # TensorBoard writer
+    writer = SummaryWriter(log_dir=args.log_dir)
 
     # Datasets
     train_ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
@@ -112,6 +117,17 @@ def train_mode(args):
             thresholds = find_optimal_thresholds(probs, targets)
             print(f"[Epoch {epoch}] Updated thresholds", flush=True)
 
+        # --- TensorBoard logging ---
+        writer.add_scalar('Loss/train', train_loss, epoch)
+        writer.add_scalar('Loss/val', val_loss, epoch)
+        writer.add_scalar('F1/micro', metrics['micro_f1'], epoch)
+        writer.add_scalar('F1/macro', metrics['macro_f1'], epoch)
+        writer.add_scalar('AUROC/mean', metrics['mean_auroc'], epoch)
+
+        # log learning rate(s)
+        for i, pg in enumerate(optimizer.param_groups):
+            writer.add_scalar(f'LR/group{i}', pg['lr'], epoch)
+
         # logging
         print(f"[Epoch {epoch}] Train Loss: {train_loss:.4f}, "
               f"Val Loss: {val_loss:.4f}, Metrics: {metrics}", flush=True)
@@ -122,6 +138,8 @@ def train_mode(args):
             path = os.path.join(args.output_dir, f"best_epoch{epoch}.pt")
             torch.save(model.state_dict(), path)
             print(f"Saved best model to {path}", flush=True)
+
+    writer.close()
 
 
 def cf_mode(args):
