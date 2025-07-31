@@ -147,9 +147,12 @@ def train_mode(args):
 
             # Prototype-level Contrastive
             if args.use_proto_contrast:
-                protos = model.prototype.prototype_vectors
-                proto_con = prototype_contrastive_loss(protos, W_proto)
-                total = total + args.alpha_contrast * proto_con
+                num_p = model.prototype.num_prototypes
+                model.prototype.class_assign = torch.arange(num_p, device=device) % args.num_labels
+                proto_classes = model.prototype.class_assign     # (P,)
+                W_proto = J[proto_classes][:, proto_classes]
+                protos = model.prototype.prototypes
+
             else:
                 proto_con = torch.tensor(0., device=device)
 
