@@ -81,7 +81,8 @@ def train_mode(args):
         n_heads=args.n_heads,
         n_layers=args.n_layers,
         num_concepts=args.num_concepts,
-        num_labels=args.num_labels
+        num_labels=args.num_labels,
+        dropout=args.dropout
     ).to(device)
 
     # Optimizer & Scheduler
@@ -367,6 +368,7 @@ def main():
                          help='number of epochs to linearly warm up LR')
     p_train.add_argument('--threshold_freq',    type=int,   default=20,
                          help='epochs between threshold recalculations')
+    p_train.add_argument('--dropout', type=float, default=0.1, help='dropout rate for model')
 
     p_train.add_argument('--d_model',        type=int, default=64)
     p_train.add_argument('--n_heads',        type=int, default=4)
