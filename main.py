@@ -40,7 +40,7 @@ def train_mode(args):
     val_ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
 
     # class-balanced sampling
-    all_labels = np.vstack([lbl for _, lbl in train_ds])
+    all_labels = np.vstack([item[-1] for item in train_ds])
     sample_weights = 1.0 / (all_labels.sum(axis=1) + 1)
     sampler = torch.utils.data.WeightedRandomSampler(
         weights=sample_weights,
