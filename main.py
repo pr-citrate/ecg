@@ -101,7 +101,7 @@ def train_mode(args):
 
     # Prototype-level W_proto 계산
     if args.use_proto_contrast:
-        proto_classes = model.prototype_layer.class_assign  # (P,)
+        proto_classes = model.prototype.class_assign  # (P,)
         W_proto = J[proto_classes][:, proto_classes]         # (P, P)
 
     for epoch in range(1, args.epochs + 1):
@@ -147,7 +147,7 @@ def train_mode(args):
 
             # Prototype-level Contrastive
             if args.use_proto_contrast:
-                protos = model.prototype_layer.prototype_vectors
+                protos = model.prototype.prototype_vectors
                 proto_con = prototype_contrastive_loss(protos, W_proto)
                 total = total + args.alpha_contrast * proto_con
             else:
