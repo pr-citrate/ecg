@@ -114,7 +114,8 @@ def train_mode(args):
 
         # ---- 손실 함수 정의 ----
         def loss_fn(batch, labels):
-            # batch: 차례대로 (x) or (view1, view2)
+            # batch: (x) or (view1, view2, label)
+            # 1) 분류 및 InfoNCE 손실
             if args.contrastive:
                 v1, v2 = batch
                 out1 = model(v1.to(device))
@@ -133,31 +134,30 @@ def train_mode(args):
                 total = clf + args.alpha * con
                 p_feats = out1['attn_feats']
             else:
-                out = model(batch.to(device))
+                x = batch
+                out = model(x.to(device))
                 clf = classification_loss(
                     out['logits'], labels.to(device),
                     loss_type='focal', gamma=2.0, pos_weight=pos_weight_tensor
                 )
-                con = torch.tensor(0., device=device)
+                con = torch.tensor(0.0, device=device)
                 total = clf
                 p_feats = out['attn_feats']
 
-            # Prototype & attention reg.
+            # 2) Prototype & Attention 정규화 추가
             total = total + prototype_loss(model) + attention_regularization(p_feats)
 
-            # Prototype-level Contrastive
-            if args.use_proto_contrast:
-                num_p = model.prototype.num_prototypes
-                model.prototype.class_assign = torch.arange(num_p, device=device) % args.num_labels
-                proto_classes = model.prototype.class_assign     # (P,)
-                W_proto = J[proto_classes][:, proto_classes]
-                protos = model.prototype.prototypes
+            # 3) Prototype-level Contrastive 초기화
+            proto_con = torch.tensor(0.0, device=device)
 
-            else:
-                proto_con = torch.tensor(0., device=device)
+            # 4) 필요시 Jaccard-가중 프로토타입 대조 손실 추가
+            if args.use_proto_contrast:
+                # W_proto는 train_mode 시작 부분에서 미리 계산되어 있어야 합니다.
+                protos = model.prototype.prototypes
+                proto_con = prototype_contrastive_loss(protos, W_proto)
+                total += args.alpha_contrast * proto_con
 
             return total, clf, con, proto_con
-
 
         model.train()
         epoch_loss = 0.0

@@ -40,6 +40,9 @@ class HybridECGModel(nn.Module):
         )
         # Prototype memory branch
         self.prototype = PrototypeMemory(d_model, num_prototypes)
+        self.prototype.class_assign = torch.arange(
+            num_prototypes, dtype=torch.long
+        ) % num_labels
         # Concept bottleneck layer
         self.bottleneck = ConceptBottleneck(
             d_model=d_model,
