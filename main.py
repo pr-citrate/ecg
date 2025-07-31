@@ -85,6 +85,11 @@ def train_mode(args):
         dropout=args.dropout
     ).to(device)
 
+    if args.resume is not None:
+        checkpoint = torch.load(args.resume, map_location=device)
+        model.load_state_dict(checkpoint)
+        print(f"[Resume] Loaded model weights from {args.resume}", flush=True)
+
     # Optimizer & Scheduler
     optimizer, scheduler = get_optimizer_scheduler(
         model,
@@ -357,6 +362,7 @@ def main():
     p_train.add_argument('--batch_size',    type=int,   default=32)
     p_train.add_argument('--lr',            type=float, default=1e-4)
     p_train.add_argument('--weight_decay',  type=float, default=1e-5)
+    p_train.add_argument('--resume', type=str, default=None)
 
     p_train.add_argument('--scheduler',         type=str,   choices=['step','cosine','plateau'], default='step')
     p_train.add_argument('--scheduler_step',    type=int,   default=10)
