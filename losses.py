@@ -70,3 +70,33 @@ def attention_regularization(attn_feats: torch.Tensor, l1_coeff: float = 1e-3) -
     """
     # Encourage sparse/concise attention output
     return l1_coeff * torch.mean(torch.abs(attn_feats))
+
+def compute_jaccard(Y: torch.Tensor) -> torch.Tensor:
+    inter = (Y.unsqueeze(2) * Y.unsqueeze(1)).sum(0).float()
+    union = ((Y.unsqueeze(2) + Y.unsqueeze(1)) >= 1).sum(0).float()
+    return inter / (union + 1e-8)                   # (C, C)
+
+def contrastive_loss(z_i: torch.Tensor, z_j: torch.Tensor, temperature: float = 0.5) -> torch.Tensor:
+    batch_size = z_i.size(0)
+    z_i = nn.functional.normalize(z_i, dim=1)
+    z_j = nn.functional.normalize(z_j, dim=1)
+    z = torch.cat([z_i, z_j], dim=0)               # (2B, D)
+    sim = torch.matmul(z, z.T) / temperature       # (2B,2B)
+    mask = torch.eye(2*batch_size, device=z.device).bool()
+    sim = sim.masked_fill(mask, -9e15)
+    pos = torch.cat([torch.diag(sim, batch_size), torch.diag(sim, -batch_size)])
+    exp_sim = torch.exp(sim)
+    denom = exp_sim.sum(dim=1)
+    loss = -torch.log(torch.exp(pos) / denom)
+    return loss.mean()
+
+def prototype_contrastive_loss(prototypes: torch.Tensor, W_proto: torch.Tensor) -> torch.Tensor:
+    P, D = prototypes.shape
+    p_norm = nn.functional.normalize(prototypes, dim=1)        # (P, D)
+    sim = p_norm @ p_norm.T                        # (P, P)
+    sim = sim.masked_fill(torch.eye(P, device=sim.device).bool(), 0.0)
+    pos_mask = W_proto
+    neg_mask = 1.0 - W_proto
+    pos_mean = (pos_mask * sim).sum() / pos_mask.sum().clamp(min=1.0)
+    neg_mean = (neg_mask * sim).sum() / neg_mask.sum().clamp(min=1.0)
+    return neg_mean - pos_mean

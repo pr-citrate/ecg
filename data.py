@@ -134,3 +134,13 @@ class ECGDataset(Dataset):
         label = torch.tensor(self.labels[idx], dtype=torch.float)
 
         return signal, label
+
+class ECGContrastiveDataset(ECGDataset):
+    def __getitem__(self, idx):
+        signal, label = super().__getitem__(idx)
+        view1 = self._augment(signal)
+        view2 = self._augment(signal)
+        return view1, view2, label
+
+    def _augment(self, x):
+        return x + 0.01 * torch.randn_like(x)

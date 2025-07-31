@@ -5,9 +5,10 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from data import ECGDataset
+from data import ECGDataset, ECGContrastiveDataset
 from models.hybrid import HybridECGModel
-from losses import classification_loss, prototype_loss, attention_regularization
+from losses import classification_loss, prototype_loss, attention_regularization, compute_jaccard, contrastive_loss, \
+    prototype_contrastive_loss
 from train_utils import (
     get_optimizer_scheduler,
     train_one_epoch,
@@ -19,6 +20,11 @@ from torch.utils.tensorboard import SummaryWriter
 from explain import generate_counterfactual, learn_cavs, compute_tcav_scores
 from plot_utils import plot_counterfactual
 
+def load_label_matrix(meta_csv, data_dir):
+    """ECGDataset 순환해 (N, C) 레이블 매트릭스 반환"""
+    base = ECGDataset(meta_csv, data_dir, use_lowres=False)
+    labels = [lbl.cpu().numpy() if torch.is_tensor(lbl) else lbl for _, lbl in base]
+    return np.stack(labels, axis=0)
 
 def train_mode(args):
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
@@ -26,8 +32,11 @@ def train_mode(args):
     # TensorBoard writer
     writer = SummaryWriter(log_dir=args.log_dir)
 
-    # Datasets
-    train_ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
+    # Datasets: general vs. Contrastive
+    if args.contrastive:
+        train_ds = ECGContrastiveDataset(args.meta_csv, args.data_dir, use_lowres=False)
+    else:
+        train_ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
     val_ds = ECGDataset(args.meta_csv, args.data_dir, use_lowres=False)
 
     # class-balanced sampling
@@ -60,6 +69,10 @@ def train_mode(args):
     warmup_epochs = args.warmup_epochs
     print(f"[Init] warmup_epochs = {warmup_epochs}", flush=True)
 
+    if args.use_proto_contrast:
+        Y = load_label_matrix(args.meta_csv, args.data_dir)  # (N, C)
+        J = compute_jaccard(torch.from_numpy(Y).to(device))  # (C, C)
+
     # Model
     model = HybridECGModel(
         in_channels=12,
@@ -86,6 +99,11 @@ def train_mode(args):
     best_f1 = 0.0
     os.makedirs(args.output_dir, exist_ok=True)
 
+    # Prototype-level W_proto 계산
+    if args.use_proto_contrast:
+        proto_classes = model.prototype_layer.class_assign  # (P,)
+        W_proto = J[proto_classes][:, proto_classes]         # (P, P)
+
     for epoch in range(1, args.epochs + 1):
         # linear warm-up for first warmup_epochs
         if warmup_epochs > 0 and epoch <= warmup_epochs:
@@ -93,17 +111,79 @@ def train_mode(args):
             for pg in optimizer.param_groups:
                 pg['lr'] = warm_lr
 
-        loss_fn = lambda p, t: classification_loss(
-            p, t,
-            loss_type='focal',
-            gamma=2.0,
-            pos_weight=pos_weight_tensor
-        ) + prototype_loss(model) + attention_regularization(p)
 
-        train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
+        # ---- 손실 함수 정의 ----
+        def loss_fn(batch, labels):
+            # batch: 차례대로 (x) or (view1, view2)
+            if args.contrastive:
+                v1, v2 = batch
+                out1 = model(v1.to(device))
+                out2 = model(v2.to(device))
+                # 분류 손실
+                clf = classification_loss(
+                    out1['logits'], labels.to(device),
+                    loss_type='focal', gamma=2.0, pos_weight=pos_weight_tensor
+                )
+                # InfoNCE 손실
+                con = contrastive_loss(
+                    out1['concept_scores'],
+                    out2['concept_scores'],
+                    temperature=args.temperature
+                )
+                total = clf + args.alpha * con
+                p_feats = out1['attn_feats']
+            else:
+                out = model(batch.to(device))
+                clf = classification_loss(
+                    out['logits'], labels.to(device),
+                    loss_type='focal', gamma=2.0, pos_weight=pos_weight_tensor
+                )
+                con = torch.tensor(0., device=device)
+                total = clf
+                p_feats = out['attn_feats']
+
+            # Prototype & attention reg.
+            total = total + prototype_loss(model) + attention_regularization(p_feats)
+
+            # Prototype-level Contrastive
+            if args.use_proto_contrast:
+                protos = model.prototype_layer.prototype_vectors
+                proto_con = prototype_contrastive_loss(protos, W_proto)
+                total = total + args.alpha_contrast * proto_con
+            else:
+                proto_con = torch.tensor(0., device=device)
+
+            return total, clf, con, proto_con
+
+
+        model.train()
+        epoch_loss = 0.0
+        for step, batch in enumerate(train_loader):
+            optimizer.zero_grad()
+            # batch unpack
+            if args.contrastive:
+                data, labels = batch[:2], batch[2]
+            else:
+                data, labels = batch
+            loss, clf_l, con_l, proto_l = loss_fn(data, labels)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item() * (labels.size(0))
+            # step별 로깅
+            writer.add_scalar("Train/Loss_step", loss.item(), (epoch-1)*len(train_loader)+step)
+        train_loss = epoch_loss / len(train_loader.dataset)
+
+
+        # validation 전용 손실: classification + prototype + attention (contrastive 제외)
+        def eval_loss_fn(logits, labels):
+            cls = classification_loss(
+                logits, labels,
+                loss_type='focal', gamma=2.0, pos_weight=pos_weight_tensor
+            )
+            return cls + prototype_loss(model) + attention_regularization(logits)
 
         val_loss, metrics, probs, targets = evaluate(
-            model, val_loader, loss_fn, device, threshold=thresholds
+            model, val_loader, eval_loss_fn, device, threshold=thresholds
         )
 
         # scheduler step
@@ -123,6 +203,12 @@ def train_mode(args):
         writer.add_scalar('F1/micro', metrics['micro_f1'], epoch)
         writer.add_scalar('F1/macro', metrics['macro_f1'], epoch)
         writer.add_scalar('AUROC/mean', metrics['mean_auroc'], epoch)
+
+        # prototype & contrastive 손실 로그 (epoch 단위)
+        if args.contrastive:
+            writer.add_scalar("Train/Contrastive", con_l.item(), epoch)
+        if args.use_proto_contrast:
+            writer.add_scalar("Train/ProtoContrastive", proto_l.item(), epoch)
 
         # log learning rate(s)
         for i, pg in enumerate(optimizer.param_groups):
@@ -288,6 +374,14 @@ def main():
     p_train.add_argument('--device',     default='cuda')
     p_train.add_argument('--output_dir', default='chkpts')
     p_train.add_argument('--log_dir',    default='runs')
+
+
+    # --- Contrastive & ProtoContrastive 옵션 추가 ---
+    p_train.add_argument('--contrastive', action='store_true', help='use InfoNCE contrastive loss')
+    p_train.add_argument('--alpha', type=float, default=1.0, help='InfoNCE weight')
+    p_train.add_argument('--temperature', type=float, default=0.5, help='InfoNCE temperature')
+    p_train.add_argument('--use_proto_contrast', action='store_true', help='use prototype-level contrastive loss')
+    p_train.add_argument('--alpha_contrast', type=float, default=1.0, help='prototype contrastive weight')
 
     # Counterfactual
     p_cf = sub.add_parser('cf')
