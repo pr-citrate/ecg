@@ -51,6 +51,13 @@ def get_optimizer_scheduler(model: torch.nn.Module,
             factor=scheduler_factor,
             patience=scheduler_patience
         )
+    elif scheduler_type == 'cosine_restart':
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=scheduler_step_size,
+            T_mult=1,
+            eta_min=0.0
+        )
     else:
         raise ValueError(f"Unknown scheduler_type {scheduler_type}")
 

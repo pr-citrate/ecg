@@ -364,7 +364,7 @@ def main():
     p_train.add_argument('--weight_decay',  type=float, default=1e-5)
     p_train.add_argument('--resume', type=str, default=None)
 
-    p_train.add_argument('--scheduler',         type=str,   choices=['step','cosine','plateau'], default='step')
+    p_train.add_argument('--scheduler',         type=str,   choices=['step','cosine', 'cosine_restart','plateau'], default='step')
     p_train.add_argument('--scheduler_step',    type=int,   default=10)
     p_train.add_argument('--scheduler_gamma',   type=float, default=0.1)
     p_train.add_argument('--scheduler_patience',type=int,   default=5)
